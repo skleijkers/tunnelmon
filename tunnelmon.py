@@ -51,11 +51,11 @@ class Tunnel:
         assert out_port is not None
         self.out_port = out_port
         assert forward is not None
-        self.forwards = {'L':'local', 'R':'remote', 'D': 'dynamic'}
+        self.forwards = {'L':'local', 'R':'remote', 'D': 'dynamic', 'V':'reverse'}
         if forward in self.forwards:
             self.forward = self.forwards[forward]
         else:
-            self.forward = "unknown"    
+            self.forward = "unknown"
 
         self.connections = []
 
@@ -251,6 +251,44 @@ class TunnelsParser:
                         if log_sensitive:
                             logging.debug("[SENSITIVE] connection: %s", connection)
                         self.tunnels[pid].connections.append(connection)
+                # Check for incoming (reverse) ssh tunnels
+                elif process['name'] == 'sshd':
+                    if log_sensitive:
+                        logging.debug("[SENSITIVE] process: %s ", process)
+
+                    pid = process['pid']
+                    in_port = 22
+                    via_host = 'localhost'
+                    target_host = 'localhost'
+                    out_port = 0
+                    forward = 'V'
+                    self.tunnels[pid] = RawTunnel(pid, in_port, via_host, target_host, out_port, forward)
+                    if log_sensitive:
+                        logging.debug("[SENSITIVE] parsed: %s %s %s %s %s", in_port, via_host, target_host, out_port, forward)
+
+                    con_est = 0
+                    con_lis = 0
+                    for c in process['connections']:
+                        if log_sensitive:
+                            logging.debug("[SENSITIVE] connection: %s", c)
+                        laddr, lport = c.laddr
+                        if c.raddr:
+                            raddr, rport = c.raddr
+                        else:
+                            raddr, rport = (None, None)
+                        connection = Connection(laddr, lport, raddr, rport, c.status, c.family)
+                        if log_sensitive:
+                            logging.debug("[SENSITIVE] connection: %s", connection)
+                        if c.status == 'ESTABLISHED':
+                            self.tunnels[pid].connections.insert(0,connection)
+                            con_est = 1
+                        else:
+                            self.tunnels[pid].connections.append(connection)
+                            con_lis = 1
+
+                    # Check if it isn't the sshd daemon itself or an incoming ssh session without tunnels
+                    if not con_est or not con_lis: # there should be a established and one or more listen sessions
+                        self.tunnels.popitem()
 
         if log_sensitive:
             logging.debug("[SENSITIVE] %s", self.tunnels)
@@ -314,6 +352,7 @@ class CursesMonitor:
             'forward_local'  : curses.COLOR_BLUE,
             'forward_remote' : curses.COLOR_CYAN,
             'forward_dynamic': curses.COLOR_YELLOW,
+            'forward_reverse' : curses.COLOR_MAGENTA,
             'forward_unknown': curses.COLOR_WHITE,
         }
         self.colors_highlight = {
@@ -335,6 +374,7 @@ class CursesMonitor:
             'forward_local'  : 9,
             'forward_remote' : 9,
             'forward_dynamic': 9,
+            'forward_reverse': 9,
             'forward_unknown': 9,
         }
         self.colors_connection = {
