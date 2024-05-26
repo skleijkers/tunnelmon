@@ -253,42 +253,45 @@ class TunnelsParser:
                         self.tunnels[pid].connections.append(connection)
                 # Check for incoming (reverse) ssh tunnels
                 elif process['name'] == 'sshd':
-                    if log_sensitive:
-                        logging.debug("[SENSITIVE] process: %s ", process)
-
-                    pid = process['pid']
-                    in_port = 22
-                    via_host = 'localhost'
-                    target_host = 'localhost'
-                    out_port = 0
-                    forward = 'V'
-                    self.tunnels[pid] = RawTunnel(pid, in_port, via_host, target_host, out_port, forward)
-                    if log_sensitive:
-                        logging.debug("[SENSITIVE] parsed: %s %s %s %s %s", in_port, via_host, target_host, out_port, forward)
-
-                    con_est = 0
-                    con_lis = 0
-                    for c in process['connections']:
+                    if os.geteuid() != 0:
+                        logging.debug("Not running as root, skipping reverse / incoming tunnel detection")
+                    else:
                         if log_sensitive:
-                            logging.debug("[SENSITIVE] connection: %s", c)
-                        laddr, lport = c.laddr
-                        if c.raddr:
-                            raddr, rport = c.raddr
-                        else:
-                            raddr, rport = (None, None)
-                        connection = Connection(laddr, lport, raddr, rport, c.status, c.family)
-                        if log_sensitive:
-                            logging.debug("[SENSITIVE] connection: %s", connection)
-                        if c.status == 'ESTABLISHED':
-                            self.tunnels[pid].connections.insert(0,connection)
-                            con_est = 1
-                        else:
-                            self.tunnels[pid].connections.append(connection)
-                            con_lis = 1
+                            logging.debug("[SENSITIVE] process: %s ", process)
 
-                    # Check if it isn't the sshd daemon itself or an incoming ssh session without tunnels
-                    if not con_est or not con_lis: # there should be a established and one or more listen sessions
-                        self.tunnels.popitem()
+                        pid = process['pid']
+                        in_port = 0
+                        via_host = 'unknown'
+                        target_host = 'unknown'
+                        out_port = 0
+                        forward = 'V'
+                        self.tunnels[pid] = RawTunnel(pid, in_port, via_host, target_host, out_port, forward)
+                        if log_sensitive:
+                            logging.debug("[SENSITIVE] parsed: %s %s %s %s %s", in_port, via_host, target_host, out_port, forward)
+
+                        con_est = 0
+                        con_lis = 0
+                        for c in process['connections']:
+                            if log_sensitive:
+                                logging.debug("[SENSITIVE] connection: %s", c)
+                            laddr, lport = c.laddr
+                            if c.raddr:
+                                raddr, rport = c.raddr
+                            else:
+                                raddr, rport = (None, None)
+                            connection = Connection(laddr, lport, raddr, rport, c.status, c.family)
+                            if log_sensitive:
+                                logging.debug("[SENSITIVE] connection: %s", connection)
+                            if c.status == 'ESTABLISHED':
+                                self.tunnels[pid].connections.insert(0,connection)
+                                con_est = 1
+                            else:
+                                self.tunnels[pid].connections.append(connection)
+                                con_lis = 1
+
+                        # Check if it isn't the sshd daemon itself or an incoming ssh session without tunnels
+                        if not con_est or not con_lis: # there should be a established and one or more listen sessions
+                            self.tunnels.popitem()
 
         if log_sensitive:
             logging.debug("[SENSITIVE] %s", self.tunnels)
